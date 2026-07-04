@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Brand + neutral palette (professional console) */
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+
+  /* Modal enter animations */
+  --animate-overlay-in: overlay-in 150ms ease-out;
+  --animate-modal-in: modal-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  @keyframes overlay-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes modal-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+}
+
+:root {
+  --background: #f6f7f9;
+  --foreground: #0f172a;
+  --surface: #ffffff;
+  --border: #e5e7eb;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Subtle scrollbars for a cleaner look */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+/* Focus ring consistency. Layered so utilities (e.g. focus:outline-none) can override. */
+@layer base {
+  :where(button, a, input, select, textarea):focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+}

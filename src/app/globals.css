@@ -63,6 +63,21 @@ body {
   scrollbar-color: #cbd5e1 transparent;
 }
 
+/* Native <select> dropdown options: browsers render them unpadded by default
+   (especially noticeable on Windows). margin is not supported on <option>,
+   so use padding + line-height for breathing room. */
+select option {
+  padding: 0.5rem 0.75rem;
+  line-height: 1.8;
+  background-color: var(--surface);
+  color: var(--foreground);
+}
+select option:checked {
+  background-color: var(--color-brand-50);
+  color: var(--color-brand-700);
+  font-weight: 500;
+}
+
 /* Focus ring consistency. Layered so utilities (e.g. focus:outline-none) can override. */
 @layer base {
   :where(button, a, input, select, textarea):focus-visible {

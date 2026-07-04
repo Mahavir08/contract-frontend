@@ -3,17 +3,17 @@
 Next.js 16 (App Router, React 19) UI for the Contract Operations Console:
 contracts list/detail/upload, org switcher, and live updates over Socket.IO.
 
-The REST API lives in the **backend repo**, which also contains the Docker
+The REST API lives in the **contract-backend repo**, which also contains the Docker
 Compose stack, the Cloud Run deploy script, and the full project documentation.
-Clone both repos **side by side** (this one as `frontend`) — the backend's
-compose file and deploy script reference this repo as `../frontend`.
+Clone both repos **side by side** (this one as `contract-frontend`) — the backend's
+compose file and deploy script reference this repo as `../contract-frontend`.
 
 ## Run the whole stack (Docker)
 
-From the backend repo:
+From the contract-backend repo:
 
 ```bash
-cd ../backend
+cd ../contract-backend
 docker compose up --build
 ```
 

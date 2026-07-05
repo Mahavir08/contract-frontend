@@ -1,9 +1,11 @@
 "use client";
 import { useEffect } from "react";
 import { getSocket } from "./socket";
-import type { ContractStatus } from "./types";
+import type { Contract, ContractStatus } from "./types";
 
-export type RealtimePayload = { id: string; status?: ContractStatus };
+// `contract` is present on updates so the list can patch a single row in place
+// (no refetch, no full-table rerender). Absent on create/delete.
+export type RealtimePayload = { id: string; status?: ContractStatus; contract?: Contract };
 
 // Subscribe to contract realtime events for the current tab. The handler is
 // invoked on create/update/delete so pages can refetch or patch local state.

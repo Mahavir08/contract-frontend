@@ -16,6 +16,38 @@
   --animate-modal-in: modal-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
   --animate-dropdown-in: dropdown-in 120ms cubic-bezier(0.16, 1, 0.3, 1);
 
+  /* Realtime "just updated over socket" highlights. `flash` tints the
+     background (good for table rows); `flash-ring` pulses a brand ring
+     (good for cards/blocks that already have a white background). */
+  --animate-flash: flash 1.6s ease-out;
+  --animate-flash-ring: flash-ring 1.6s ease-out;
+
+  @keyframes flash {
+    0% {
+      background-color: color-mix(in srgb, var(--color-brand-500) 24%, transparent);
+    }
+    30% {
+      background-color: color-mix(in srgb, var(--color-brand-500) 24%, transparent);
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+
+  @keyframes flash-ring {
+    0% {
+      box-shadow: 0 0 0 2px var(--color-brand-500),
+        0 0 0 6px color-mix(in srgb, var(--color-brand-500) 22%, transparent);
+    }
+    30% {
+      box-shadow: 0 0 0 2px var(--color-brand-500),
+        0 0 0 6px color-mix(in srgb, var(--color-brand-500) 22%, transparent);
+    }
+    100% {
+      box-shadow: 0 0 0 0 transparent, 0 0 0 0 transparent;
+    }
+  }
+
   @keyframes dropdown-in {
     from {
       opacity: 0;

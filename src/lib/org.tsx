@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "./api";
 import { getSocket } from "./socket";
 import type { Organisation } from "./types";
@@ -108,13 +108,13 @@ export function OrgProvider({ children }: { children: React.ReactNode }) {
     };
   }, [orgId]);
 
-  const setOrgId = (id: string) => {
+  const setOrgId = useCallback((id: string) => {
     writeStoredOrgId(id);
     setOrgIdState(id);
-  };
+  }, []);
 
   // Create an org, then add it to the list and switch to it immediately.
-  const createOrg = async (name: string) => {
+  const createOrg = useCallback(async (name: string) => {
     const created = await api.createOrganisation(name);
     setOrgs((prev) =>
       [...prev.filter((o) => o.id !== created.id), created].sort((a, b) =>
@@ -123,16 +123,20 @@ export function OrgProvider({ children }: { children: React.ReactNode }) {
     );
     setOrgId(created.id);
     return created;
-  };
+  }, [setOrgId]);
 
-  const org = orgs.find((o) => o.id === orgId) ?? null;
-  const reload = () => setReloadKey((k) => k + 1);
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
-  return (
-    <OrgContext.Provider value={{ orgs, orgId, org, setOrgId, createOrg, loading, error, reload }}>
-      {children}
-    </OrgContext.Provider>
+  const org = useMemo(() => orgs.find((o) => o.id === orgId) ?? null, [orgs, orgId]);
+
+  // Memoise the context value so consumers only re-render when a field they
+  // read actually changes, not on every provider render.
+  const value = useMemo(
+    () => ({ orgs, orgId, org, setOrgId, createOrg, loading, error, reload }),
+    [orgs, orgId, org, setOrgId, createOrg, loading, error, reload]
   );
+
+  return <OrgContext.Provider value={value}>{children}</OrgContext.Provider>;
 }
 
 export function useOrg() {

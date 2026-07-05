@@ -102,14 +102,24 @@ export const api = {
     return data as Attachment;
   },
 
+  deleteAttachment: (orgId: string, id: string, attachmentId: string) =>
+    request<void>(`/api/contracts/${id}/attachments/${attachmentId}`, { method: "DELETE", orgId }),
+
   // Fetch the attachment bytes and return an object URL for inline preview.
   // Caller is responsible for revoking the URL when done.
   getAttachmentBlobUrl: async (orgId: string, id: string, attachmentId: string) => {
-    const res = await fetch(`${API_URL}/api/contracts/${id}/attachments/${attachmentId}/download`, {
+    const res = await fetch(`${API_URL}/api/contracts/${id}/attachments/${attachmentId}/download?inline=1`, {
       headers: { "x-org-id": orgId },
     });
     if (!res.ok) throw new ApiError(res.status, "Preview failed");
-    return URL.createObjectURL(await res.blob());
+    // Force the blob MIME type to application/pdf. res.blob() inherits its type
+    // from the response Content-Type; if that's anything but application/pdf,
+    // strict browsers (Windows Chrome) download the iframe src instead of
+    // rendering it, while Safari sniffs and renders anyway. Normalising here
+    // makes inline preview behave the same on every platform/browser.
+    const raw = await res.blob();
+    const pdf = raw.type === "application/pdf" ? raw : new Blob([raw], { type: "application/pdf" });
+    return URL.createObjectURL(pdf);
   },
 
   // Download via fetch (so we can send the X-Org-Id header) then trigger a save.

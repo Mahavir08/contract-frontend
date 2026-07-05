@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useOrg } from "@/lib/org";
 import { api } from "@/lib/api";
@@ -38,6 +38,44 @@ function contractTotal(c: Contract): number {
 const currency = (n: number) =>
   n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
+// Memoized so a realtime patch to one contract only rerenders that row: rows
+// whose `contract` object reference is unchanged bail out of the shallow compare.
+const ContractRow = memo(function ContractRow({ contract: c, flash }: { contract: Contract; flash?: number }) {
+  const rowRef = useRef<HTMLTableRowElement>(null);
+  // Replay the highlight every time `flash` bumps (undefined on first load = no
+  // flash). Remove + reflow + re-add so repeated updates to the same row restart
+  // the animation instead of being ignored as an already-applied class.
+  useEffect(() => {
+    if (!flash) return;
+    const el = rowRef.current;
+    if (!el) return;
+    el.classList.remove("animate-flash");
+    void el.offsetWidth;
+    el.classList.add("animate-flash");
+  }, [flash]);
+  return (
+    <tr ref={rowRef} className="group transition-colors hover:bg-gray-50/70">
+      <td className={`px-4 py-3.5 sm:px-5 ${COL_VIS[0]}`}>
+        <Link href={`/contracts/${c.id}`} className="flex items-center gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">
+            {c.clientName.slice(0, 2).toUpperCase()}
+          </span>
+          <span className="font-medium text-gray-900 group-hover:text-brand-700">{c.clientName}</span>
+        </Link>
+      </td>
+      <td className={`px-4 py-3.5 text-gray-600 sm:px-5 ${COL_VIS[1]}`}>{c.poRefNo}</td>
+      <td className={`whitespace-nowrap px-4 py-3.5 text-gray-600 sm:px-5 ${COL_VIS[2]}`}>{c.poDate.slice(0, 10)}</td>
+      <td className={`whitespace-nowrap px-4 py-3.5 text-right font-medium tabular-nums text-gray-800 sm:px-5 ${COL_VIS[3]}`}>{currency(contractTotal(c))}</td>
+      <td className={`px-4 py-3.5 sm:px-5 ${COL_VIS[4]}`}><StatusBadge status={c.status} /></td>
+      <td className={`px-4 py-3.5 text-right sm:px-5 ${COL_VIS[5]}`}>
+        <Link href={`/contracts/${c.id}`} className="inline-flex text-gray-300 group-hover:text-gray-500">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6" /></svg>
+        </Link>
+      </td>
+    </tr>
+  );
+});
+
 export default function ContractsPage() {
   const { orgId, org, loading: orgLoading } = useOrg();
   const [clientName, setClientName] = useState("");
@@ -47,6 +85,9 @@ export default function ContractsPage() {
   const [result, setResult] = useState<Paginated<Contract> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Per-contract counter bumped when a realtime edit patches that row; the
+  // change of value re-triggers the highlight animation on just that row.
+  const [flashes, setFlashes] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
     if (!orgId) return;
@@ -71,7 +112,33 @@ export default function ContractsPage() {
     setPage(1);
   }, [status, clientName, contractId, orgId]);
 
-  useRealtime(useCallback(() => { load(); }, [load]));
+  // On a remote edit, patch just that one row instead of refetching the whole
+  // page. Untouched rows keep their object reference, so the memoized
+  // ContractRow skips rerendering — only the changed row (e.g. its total) updates.
+  // Create/delete change the count and pagination, so those still refetch.
+  useRealtime(useCallback((event, payload) => {
+    if (event !== "updated" || !payload.contract) {
+      load();
+      return;
+    }
+    const updated = payload.contract;
+    setResult((prev) => {
+      if (!prev) return prev;
+      const i = prev.data.findIndex((c) => c.id === updated.id);
+      if (i === -1) return prev; // not on this page — ignore
+      // A status change can push the row out of the active filter; drop it
+      // rather than showing a stale entry. A full refetch reconciles counts.
+      if (status && updated.status !== status) {
+        load();
+        return prev;
+      }
+      const data = prev.data.slice();
+      data[i] = updated;
+      return { ...prev, data };
+    });
+    // Flag this row so it plays the "updated over socket" highlight.
+    setFlashes((f) => ({ ...f, [updated.id]: (f[updated.id] ?? 0) + 1 }));
+  }, [load, status]));
 
   const totalPages = result ? Math.max(1, Math.ceil(result.total / PAGE_SIZE)) : 1;
   const from = result && result.total > 0 ? (page - 1) * PAGE_SIZE + 1 : 0;
@@ -166,27 +233,7 @@ export default function ContractsPage() {
                   </tr>
                 ))
               ) : result && result.data.length > 0 ? (
-                result.data.map((c) => (
-                  <tr key={c.id} className="group transition-colors hover:bg-gray-50/70">
-                    <td className={`px-4 py-3.5 sm:px-5 ${COL_VIS[0]}`}>
-                      <Link href={`/contracts/${c.id}`} className="flex items-center gap-3">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">
-                          {c.clientName.slice(0, 2).toUpperCase()}
-                        </span>
-                        <span className="font-medium text-gray-900 group-hover:text-brand-700">{c.clientName}</span>
-                      </Link>
-                    </td>
-                    <td className={`px-4 py-3.5 text-gray-600 sm:px-5 ${COL_VIS[1]}`}>{c.poRefNo}</td>
-                    <td className={`whitespace-nowrap px-4 py-3.5 text-gray-600 sm:px-5 ${COL_VIS[2]}`}>{c.poDate.slice(0, 10)}</td>
-                    <td className={`whitespace-nowrap px-4 py-3.5 text-right font-medium tabular-nums text-gray-800 sm:px-5 ${COL_VIS[3]}`}>{currency(contractTotal(c))}</td>
-                    <td className={`px-4 py-3.5 sm:px-5 ${COL_VIS[4]}`}><StatusBadge status={c.status} /></td>
-                    <td className={`px-4 py-3.5 text-right sm:px-5 ${COL_VIS[5]}`}>
-                      <Link href={`/contracts/${c.id}`} className="inline-flex text-gray-300 group-hover:text-gray-500">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6" /></svg>
-                      </Link>
-                    </td>
-                  </tr>
-                ))
+                result.data.map((c) => <ContractRow key={c.id} contract={c} flash={flashes[c.id]} />)
               ) : (
                 <tr>
                   <td colSpan={6}>

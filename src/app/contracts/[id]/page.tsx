@@ -1,11 +1,12 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useOrg } from "@/lib/org";
 import { api, ApiError } from "@/lib/api";
 import { useRealtime } from "@/lib/useRealtime";
 import { StatusBadge } from "@/components/StatusBadge";
+import { PdfViewer } from "@/components/PdfViewer";
 import { Alert, Button, Card, EmptyState, Modal, Spinner, Textarea } from "@/components/ui";
 import type { Attachment, Contract, ContractEvent, EventType, FieldError } from "@/lib/types";
 import { formatBytes } from "@/lib/format";
@@ -39,6 +40,10 @@ export default function ContractDetailPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
   const [preview, setPreview] = useState<{ name: string; url: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Bumped when a realtime update for this contract arrives, to flash the card.
+  const [flash, setFlash] = useState(0);
+  const itemsRef = useRef<HTMLDivElement>(null);
 
   async function openPreview(a: Attachment) {
     if (!orgId || previewLoading) return;
@@ -82,8 +87,22 @@ export default function ContractDetailPage() {
   useEffect(() => { load(); }, [load]);
 
   useRealtime(useCallback((_e, payload) => {
-    if (payload.id === id) load();
+    if (payload.id === id) {
+      load();
+      setFlash((n) => n + 1);
+    }
   }, [id, load]));
+
+  // Replay the "updated over socket" ring on the line-items card each time a
+  // realtime update lands (skips initial mount when flash is 0).
+  useEffect(() => {
+    if (!flash) return;
+    const el = itemsRef.current;
+    if (!el) return;
+    el.classList.remove("animate-flash-ring");
+    void el.offsetWidth;
+    el.classList.add("animate-flash-ring");
+  }, [flash]);
 
   async function runStatus(fn: (o: string, i: string) => Promise<Contract>, label: string) {
     if (!orgId) return;
@@ -158,6 +177,23 @@ export default function ContractDetailPage() {
     } finally {
       setAction(null);
       e.target.value = "";
+    }
+  }
+
+  async function removeAttachment(a: Attachment) {
+    if (!orgId || deletingId) return;
+    if (!confirm(`Delete "${a.fileName}"? This cannot be undone.`)) return;
+    setError(null);
+    setDeletingId(a.id);
+    try {
+      await api.deleteAttachment(orgId, id, a.id);
+      // Drop the row locally instead of blocking on a full 3-endpoint reload;
+      // the realtime broadcast reconciles other tabs.
+      setAttachments((prev) => prev.filter((x) => x.id !== a.id));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to delete attachment.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -261,6 +297,7 @@ export default function ContractDetailPage() {
                 </dl>
               </Card>
 
+              <div ref={itemsRef} className="rounded-xl">
               <Card className="overflow-hidden">
                 <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3">
                   <h2 className="text-sm font-semibold text-gray-900">Line items</h2>
@@ -295,6 +332,7 @@ export default function ContractDetailPage() {
                   </table>
                 </div>
               </Card>
+              </div>
             </>
           )}
         </div>
@@ -343,6 +381,21 @@ export default function ContractDetailPage() {
                       <button onClick={() => orgId && api.downloadAttachment(orgId, id, a.id, a.fileName)} className="text-xs font-medium text-brand-600 hover:text-brand-700">
                         Download
                       </button>
+                      {isDraft && (
+                        <button
+                          onClick={() => removeAttachment(a)}
+                          disabled={!!deletingId}
+                          aria-label={`Delete ${a.fileName}`}
+                          title="Delete PDF"
+                          className="rounded-md p-1 text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                        >
+                          {deletingId === a.id ? (
+                            <Spinner className="h-4 w-4" />
+                          ) : (
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -381,7 +434,23 @@ export default function ContractDetailPage() {
       </div>
 
       <Modal open={!!preview} onClose={closePreview} title={preview?.name}>
-        {preview && <iframe src={preview.url} title="PDF preview" className="h-full w-full" />}
+        {preview && (
+          <div className="flex h-full flex-col">
+            <div className="min-h-0 w-full flex-1">
+              <PdfViewer url={preview.url} />
+            </div>
+            <div className="border-t border-gray-100 px-4 py-2 text-center">
+              <a
+                href={preview.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-medium text-brand-600 hover:text-brand-700"
+              >
+                Not showing? Open in a new tab
+              </a>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

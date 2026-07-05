@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useOrg } from "@/lib/org";
 import { getSocket } from "@/lib/socket";
@@ -24,8 +24,9 @@ function LiveIndicator() {
   }, []);
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600"
+      className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 sm:px-2.5"
       title="Realtime connection status"
+      aria-label={connected ? "Realtime connection: live" : "Realtime connection: offline"}
     >
       <span className="relative flex h-2 w-2">
         {connected && (
@@ -33,7 +34,8 @@ function LiveIndicator() {
         )}
         <span className={`relative inline-flex h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-gray-300"}`} />
       </span>
-      {connected ? "Live" : "Offline"}
+      {/* On phones the header is tight; the dot alone carries the status. */}
+      <span className="hidden sm:inline">{connected ? "Live" : "Offline"}</span>
     </span>
   );
 }
@@ -167,20 +169,153 @@ function NewOrgDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function Header() {
+// Custom listbox replacing the native <select>: option popups can't be styled
+// cross-browser (and trying degrades them), so the list is rendered ourselves.
+// The trigger stays a plain button, so open/close is as fast as the native one.
+function OrgSelect() {
   const { orgs, orgId, setOrgId, loading } = useOrg();
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  const current = orgs.find((o) => o.id === orgId);
+
+  // Close on click outside or Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // Keep the keyboard-active option visible while navigating a long list.
+  useEffect(() => {
+    if (!open || activeIndex < 0) return;
+    listRef.current?.children[activeIndex]?.scrollIntoView({ block: "nearest" });
+  }, [open, activeIndex]);
+
+  function toggle() {
+    if (!open) setActiveIndex(orgs.findIndex((o) => o.id === orgId));
+    setOpen(!open);
+  }
+
+  function choose(id: string) {
+    setOrgId(id);
+    setOpen(false);
+  }
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (!open) {
+      if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggle();
+      }
+      return;
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const delta = e.key === "ArrowDown" ? 1 : -1;
+      setActiveIndex((i) => Math.min(orgs.length - 1, Math.max(0, i + delta)));
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      if (orgs[activeIndex]) choose(orgs[activeIndex].id);
+    } else if (e.key === "Tab") {
+      setOpen(false);
+    }
+  }
+
+  return (
+    <div ref={rootRef} className="relative" onKeyDown={onKeyDown}>
+      <button
+        type="button"
+        disabled={loading}
+        onClick={toggle}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Select organisation"
+        className={`flex h-9 items-center gap-2 rounded-lg border bg-white pl-3 pr-2.5 text-sm font-medium text-gray-800 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50 ${
+          open ? "border-brand-500" : "border-gray-300"
+        }`}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-gray-400">
+          <path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01" />
+        </svg>
+        <span className="max-w-[6.5rem] truncate sm:max-w-[12rem]">
+          {current?.name ?? (loading ? "Loading…" : "Select organisation")}
+        </span>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          className={`shrink-0 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`}
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+      {open && (
+        <ul
+          ref={listRef}
+          role="listbox"
+          aria-label="Organisations"
+          className="absolute right-0 top-full z-30 mt-1.5 max-h-64 w-full min-w-[14rem] max-w-[calc(100vw-1.5rem)] overflow-auto rounded-xl bg-white p-1 shadow-lg ring-1 ring-gray-950/10 animate-dropdown-in"
+        >
+          {orgs.length === 0 && (
+            <li className="px-3 py-2 text-sm text-gray-400">No organisations yet</li>
+          )}
+          {orgs.map((o, i) => {
+            const selected = o.id === orgId;
+            return (
+              <li key={o.id} role="option" aria-selected={selected}>
+                <button
+                  type="button"
+                  onClick={() => choose(o.id)}
+                  onMouseEnter={() => setActiveIndex(i)}
+                  className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                    i === activeIndex ? "bg-gray-100" : ""
+                  } ${selected ? "font-medium text-brand-700" : "text-gray-700"}`}
+                >
+                  <span className="truncate">{o.name}</span>
+                  {selected && (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="shrink-0 text-brand-600">
+                      <path d="m5 13 4 4L19 7" />
+                    </svg>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export function Header() {
   const [creating, setCreating] = useState(false);
   return (
     <header className="sticky top-0 z-20 border-b border-gray-200 bg-white/80 backdrop-blur">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
-        <div className="flex items-center gap-6">
+      <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-2 px-3 sm:h-16 sm:gap-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-6">
           <Link href="/contracts" className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white shadow-sm">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-white shadow-sm">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M8 6h9M8 12h9M8 18h5M4 6h.01M4 12h.01M4 18h.01" />
               </svg>
             </span>
-            <span className="text-[15px] font-semibold tracking-tight text-gray-900">
+            <span className="hidden text-[15px] font-semibold tracking-tight text-gray-900 min-[420px]:inline">
               Contract Ops
             </span>
           </Link>
@@ -189,37 +324,9 @@ export function Header() {
             <NavLink href="/upload" label="Upload" />
           </nav>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <LiveIndicator />
-          <div className="relative flex items-center gap-2 rounded-lg border border-gray-300 bg-white pl-3 shadow-sm transition-colors focus-within:border-brand-500">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-400">
-              <path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01" />
-            </svg>
-            <select
-              className="h-9 appearance-none rounded-r-lg border-0 bg-transparent pr-8 text-sm font-medium text-gray-800 focus:outline-none focus:ring-0"
-              value={orgId ?? ""}
-              disabled={loading}
-              onChange={(e) => setOrgId(e.target.value)}
-              aria-label="Select organisation"
-            >
-              {orgs.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              className="pointer-events-none absolute right-3 text-gray-400"
-            >
-              <path d="m6 9 6 6 6-6" />
-            </svg>
-          </div>
+          <OrgSelect />
           <Button variant="secondary" size="sm" onClick={() => setCreating(true)} title="Create organisation">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 5v14M5 12h14" />
@@ -228,6 +335,12 @@ export function Header() {
           </Button>
         </div>
       </div>
+      {/* Phone-only nav row: the inline nav above is hidden below sm, and
+          without this the Upload page would be unreachable on mobile. */}
+      <nav className="mx-auto flex max-w-6xl items-center gap-1 px-2 pb-2 sm:hidden">
+        <NavLink href="/contracts" label="Contracts" />
+        <NavLink href="/upload" label="Upload" />
+      </nav>
       {creating && <NewOrgDialog onClose={() => setCreating(false)} />}
     </header>
   );

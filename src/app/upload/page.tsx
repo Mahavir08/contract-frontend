@@ -1,11 +1,12 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useOrg } from "@/lib/org";
 import { api, ApiError } from "@/lib/api";
-import { Alert, Button, Card, Textarea } from "@/components/ui";
+import { Alert, Button, Card, Modal, Textarea } from "@/components/ui";
 import { validateContractPayload } from "@/lib/validateContract";
+import { formatBytes } from "@/lib/format";
 import type { FieldError } from "@/lib/types";
 
 const SAMPLE = `{
@@ -42,6 +43,37 @@ export default function UploadPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [pdf, setPdf] = useState<File | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Revoke the preview object URL when it is replaced or on unmount.
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    };
+  }, [pdfUrl]);
+
+  function onPickPdf(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    if (!file) return;
+    if (file.type !== "application/pdf") {
+      setMessage("Only PDF files are allowed.");
+      e.target.value = "";
+      return;
+    }
+    setMessage(null);
+    setPdf(file);
+    setPdfUrl(URL.createObjectURL(file));
+  }
+
+  function removePdf() {
+    setPdf(null);
+    setPdfUrl(null);
+    setPreviewOpen(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
 
   async function submit() {
     setFieldErrors([]);
@@ -68,6 +100,14 @@ export default function UploadPage() {
     setSubmitting(true);
     try {
       const created = await api.createContract(orgId, parsed as never);
+      if (pdf) {
+        try {
+          await api.uploadAttachment(orgId, created.id, pdf);
+        } catch {
+          // The contract exists either way — land on it and let the user
+          // retry the upload from the attachments panel there.
+        }
+      }
       router.push(`/contracts/${created.id}`);
     } catch (e) {
       if (e instanceof ApiError) {
@@ -113,6 +153,64 @@ export default function UploadPage() {
             />
           </Card>
 
+          <Card className="p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-700">Contract PDF</p>
+                <p className="text-xs text-gray-400">Optional — attached to the contract after it is created.</p>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf"
+                className="hidden"
+                onChange={onPickPdf}
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                className="w-full sm:w-auto"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {pdf ? "Replace PDF" : "Choose PDF"}
+              </Button>
+            </div>
+            {pdf && (
+              <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:flex-1">
+                  <svg className="shrink-0 text-red-500" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M6 4h9l5 5v11a1 1 0 01-1 1H6a1 1 0 01-1-1V5a1 1 0 011-1zM14 4v6h6" />
+                  </svg>
+                  <span className="min-w-0 flex-1 truncate text-sm text-gray-700">{pdf.name}</span>
+                </div>
+                <span className="shrink-0 text-xs text-gray-400">{formatBytes(pdf.size)}</span>
+                <div className="ml-auto flex shrink-0 items-center gap-1 sm:ml-0">
+                  <button
+                    onClick={() => setPreviewOpen(true)}
+                    aria-label="Preview PDF"
+                    title="Preview PDF"
+                    className="rounded-md p-1 text-gray-500 hover:bg-gray-200 hover:text-gray-800"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={removePdf}
+                    aria-label="Remove PDF"
+                    title="Remove PDF"
+                    className="rounded-md p-1 text-gray-500 hover:bg-gray-200 hover:text-gray-800"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            )}
+          </Card>
+
           {message && <Alert>{message}</Alert>}
           {fieldErrors.length > 0 && (
             <Card className="border-red-200 bg-red-50/50 p-4">
@@ -128,7 +226,7 @@ export default function UploadPage() {
             </Card>
           )}
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button onClick={submit} disabled={submitting}>
               {submitting ? "Validating…" : "Validate & create"}
             </Button>
@@ -156,6 +254,10 @@ export default function UploadPage() {
           </div>
         </Card>
       </div>
+
+      <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title={pdf?.name}>
+        {pdfUrl && <iframe src={pdfUrl} title="PDF preview" className="h-full w-full" />}
+      </Modal>
     </div>
   );
 }

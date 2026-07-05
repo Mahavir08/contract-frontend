@@ -6,8 +6,9 @@ import { useOrg } from "@/lib/org";
 import { api, ApiError } from "@/lib/api";
 import { useRealtime } from "@/lib/useRealtime";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Alert, Button, Card, EmptyState, Spinner, Textarea } from "@/components/ui";
+import { Alert, Button, Card, EmptyState, Modal, Spinner, Textarea } from "@/components/ui";
 import type { Attachment, Contract, ContractEvent, EventType, FieldError } from "@/lib/types";
+import { formatBytes } from "@/lib/format";
 
 const currency = (n: number) =>
   n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
@@ -36,6 +37,27 @@ export default function ContractDetailPage() {
   const [editing, setEditing] = useState(false);
   const [draftText, setDraftText] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
+  const [preview, setPreview] = useState<{ name: string; url: string } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState<string | null>(null);
+
+  async function openPreview(a: Attachment) {
+    if (!orgId || previewLoading) return;
+    setError(null);
+    setPreviewLoading(a.id);
+    try {
+      const url = await api.getAttachmentBlobUrl(orgId, id, a.id);
+      setPreview({ name: a.fileName, url });
+    } catch {
+      setError("Failed to load PDF preview.");
+    } finally {
+      setPreviewLoading(null);
+    }
+  }
+
+  function closePreview() {
+    if (preview) URL.revokeObjectURL(preview.url);
+    setPreview(null);
+  }
 
   const load = useCallback(async () => {
     if (!orgId) return;
@@ -69,6 +91,7 @@ export default function ContractDetailPage() {
     setError(null);
     try {
       await fn(orgId, id);
+      setEditing(false);
       await load();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : `Failed to ${label}.`);
@@ -167,19 +190,19 @@ export default function ContractDetailPage() {
 
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-4">
-          <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-sm font-semibold text-brand-700">
+        <div className="flex min-w-0 items-start gap-3 sm:gap-4">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-sm font-semibold text-brand-700">
             {contract.clientName.slice(0, 2).toUpperCase()}
           </span>
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-semibold tracking-tight text-gray-900">{contract.clientName}</h1>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <h1 className="text-xl font-semibold tracking-tight text-gray-900 sm:text-2xl">{contract.clientName}</h1>
               <StatusBadge status={contract.status} />
             </div>
-            <button onClick={copyId} className="mt-1 inline-flex items-center gap-1.5 font-mono text-xs text-gray-400 hover:text-gray-600" title="Copy ID">
-              {id}
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-              {copied && <span className="text-green-600">copied</span>}
+            <button onClick={copyId} className="mt-1 flex max-w-full items-center gap-1.5 font-mono text-xs text-gray-400 hover:text-gray-600" title="Copy ID">
+              <span className="truncate">{id}</span>
+              <svg className="shrink-0" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+              {copied && <span className="shrink-0 text-green-600">copied</span>}
             </button>
           </div>
         </div>
@@ -206,7 +229,7 @@ export default function ContractDetailPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Main column */}
         <div className="space-y-6 lg:col-span-2">
-          {editing ? (
+          {editing && isDraft ? (
             <Card className="overflow-hidden">
               <div className="border-b border-gray-100 px-4 py-2.5 text-sm font-medium text-gray-700">Edit contract (JSON)</div>
               <Textarea className="block h-96 rounded-none border-0 text-xs shadow-none focus:outline-none" value={draftText} onChange={(e) => setDraftText(e.target.value)} spellCheck={false} />
@@ -243,32 +266,34 @@ export default function ContractDetailPage() {
                   <h2 className="text-sm font-semibold text-gray-900">Line items</h2>
                   <span className="text-xs text-gray-400">{items.length} item{items.length !== 1 ? "s" : ""}</span>
                 </div>
-                <table className="min-w-full divide-y divide-gray-100 text-sm">
-                  <thead>
-                    <tr className="text-left text-xs font-medium uppercase tracking-wide text-gray-500">
-                      <th className="px-5 py-2.5">Description</th>
-                      <th className="px-5 py-2.5 text-right">Qty</th>
-                      <th className="px-5 py-2.5 text-right">Unit price</th>
-                      <th className="px-5 py-2.5 text-right">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {items.map((it, i) => (
-                      <tr key={i}>
-                        <td className="px-5 py-3 text-gray-800">{it.description}</td>
-                        <td className="px-5 py-3 text-right tabular-nums text-gray-600">{it.quantity}{it.quantity_unit ? ` ${it.quantity_unit}` : ""}</td>
-                        <td className="px-5 py-3 text-right tabular-nums text-gray-600">{currency(it.unit_price)}{it.pricing_unit ? ` ${it.pricing_unit}` : ""}</td>
-                        <td className="px-5 py-3 text-right font-medium tabular-nums text-gray-800">{currency(it.total ?? it.quantity * it.unit_price)}</td>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-100 text-sm">
+                    <thead>
+                      <tr className="text-left text-xs font-medium uppercase tracking-wide text-gray-500">
+                        <th className="px-4 py-2.5 sm:px-5">Description</th>
+                        <th className="px-4 py-2.5 text-right sm:px-5">Qty</th>
+                        <th className="px-4 py-2.5 text-right sm:px-5">Unit price</th>
+                        <th className="px-4 py-2.5 text-right sm:px-5">Total</th>
                       </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t border-gray-200">
-                      <td colSpan={3} className="px-5 py-3 text-right text-sm font-medium text-gray-500">Total</td>
-                      <td className="px-5 py-3 text-right text-sm font-semibold tabular-nums text-gray-900">{currency(grandTotal)}</td>
-                    </tr>
-                  </tfoot>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {items.map((it, i) => (
+                        <tr key={i}>
+                          <td className="min-w-[10rem] px-4 py-3 text-gray-800 sm:px-5">{it.description}</td>
+                          <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-gray-600 sm:px-5">{it.quantity}{it.quantity_unit ? ` ${it.quantity_unit}` : ""}</td>
+                          <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-gray-600 sm:px-5">{currency(it.unit_price)}{it.pricing_unit ? ` ${it.pricing_unit}` : ""}</td>
+                          <td className="whitespace-nowrap px-4 py-3 text-right font-medium tabular-nums text-gray-800 sm:px-5">{currency(it.total ?? it.quantity * it.unit_price)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t border-gray-200">
+                        <td colSpan={3} className="px-4 py-3 text-right text-sm font-medium text-gray-500 sm:px-5">Total</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold tabular-nums text-gray-900 sm:px-5">{currency(grandTotal)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
               </Card>
             </>
           )}
@@ -280,10 +305,12 @@ export default function ContractDetailPage() {
           <Card className="p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-gray-900">Attachments</h2>
-              <label className="cursor-pointer text-xs font-medium text-brand-600 hover:text-brand-700">
-                {action === "upload" ? "Uploading…" : "+ Add PDF"}
-                <input type="file" accept="application/pdf" className="hidden" onChange={onUpload} disabled={action === "upload"} />
-              </label>
+              {isDraft && (
+                <label className="cursor-pointer text-xs font-medium text-brand-600 hover:text-brand-700">
+                  {action === "upload" ? "Uploading…" : "+ Add PDF"}
+                  <input type="file" accept="application/pdf" className="hidden" onChange={onUpload} disabled={action === "upload"} />
+                </label>
+              )}
             </div>
             {attachments.length === 0 ? (
               <p className="text-xs text-gray-400">No attachments yet.</p>
@@ -294,10 +321,29 @@ export default function ContractDetailPage() {
                     <div className="flex min-w-0 items-center gap-2">
                       <svg className="shrink-0 text-red-500" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
                       <span className="truncate text-xs text-gray-700">{a.fileName}</span>
+                      <span className="shrink-0 text-[11px] text-gray-400">{formatBytes(a.size)}</span>
                     </div>
-                    <button onClick={() => orgId && api.downloadAttachment(orgId, id, a.id, a.fileName)} className="shrink-0 text-xs font-medium text-brand-600 hover:text-brand-700">
-                      Download
-                    </button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        onClick={() => openPreview(a)}
+                        disabled={!!previewLoading}
+                        aria-label={`Preview ${a.fileName}`}
+                        title="Preview PDF"
+                        className="rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:opacity-50"
+                      >
+                        {previewLoading === a.id ? (
+                          <Spinner className="h-4 w-4" />
+                        ) : (
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </svg>
+                        )}
+                      </button>
+                      <button onClick={() => orgId && api.downloadAttachment(orgId, id, a.id, a.fileName)} className="text-xs font-medium text-brand-600 hover:text-brand-700">
+                        Download
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -333,6 +379,10 @@ export default function ContractDetailPage() {
           </Card>
         </div>
       </div>
+
+      <Modal open={!!preview} onClose={closePreview} title={preview?.name}>
+        {preview && <iframe src={preview.url} title="PDF preview" className="h-full w-full" />}
+      </Modal>
     </div>
   );
 }

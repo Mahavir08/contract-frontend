@@ -102,6 +102,16 @@ export const api = {
     return data as Attachment;
   },
 
+  // Fetch the attachment bytes and return an object URL for inline preview.
+  // Caller is responsible for revoking the URL when done.
+  getAttachmentBlobUrl: async (orgId: string, id: string, attachmentId: string) => {
+    const res = await fetch(`${API_URL}/api/contracts/${id}/attachments/${attachmentId}/download`, {
+      headers: { "x-org-id": orgId },
+    });
+    if (!res.ok) throw new ApiError(res.status, "Preview failed");
+    return URL.createObjectURL(await res.blob());
+  },
+
   // Download via fetch (so we can send the X-Org-Id header) then trigger a save.
   downloadAttachment: async (orgId: string, id: string, attachmentId: string, fileName: string) => {
     const res = await fetch(`${API_URL}/api/contracts/${id}/attachments/${attachmentId}/download`, {
